@@ -10,8 +10,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
     
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     
     <style>
         :root {
@@ -61,7 +61,7 @@
         /* 컨트롤 및 레이아웃 그리드 */
         .main-layout {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1.1fr 0.9fr;
             gap: 1.5rem;
             margin-bottom: 2rem;
         }
@@ -82,19 +82,28 @@
             box-sizing: border-box;
         }
 
-        /* 지도 영역 */
+        /* 지도 영역 - 명확한 높이값 지정 */
+        #map-card {
+            display: flex;
+            flex-direction: column;
+            min-height: 600px;
+        }
+
         #map-container {
-            height: 550px;
+            flex-grow: 1;
+            height: 500px; /* 기본 높이 보장 */
+            min-height: 500px;
             border-radius: 8px;
             overflow: hidden;
-            border: 1px solid var(--border-color);
+            border: 2px solid var(--border-color);
             position: relative;
+            background-color: #e5e9f0; /* 지도 로딩 전 배경색 */
         }
 
         #map {
             width: 100%;
             height: 100%;
-            z-index: 1;
+            display: block;
         }
 
         /* 대시보드 정보 영역 */
@@ -136,7 +145,7 @@
 
         .dashboard-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1.1fr 0.9fr;
             gap: 1rem;
         }
 
@@ -155,16 +164,18 @@
             padding: 1rem;
             border: 1px solid #e2e8f0;
             border-radius: 8px;
+            background-color: #f8fafc;
         }
 
         .status-badge {
-            font-size: 1.15rem;
+            font-size: 1.1rem;
             font-weight: bold;
             padding: 0.6rem 1.2rem;
             border-radius: 50px;
             margin-top: 0.8rem;
             color: white;
             display: inline-block;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
 
         .status-available { background-color: var(--success-color); }
@@ -197,7 +208,7 @@
         }
 
         .chart-card {
-            height: 300px;
+            height: 320px;
             width: 100%;
         }
 
@@ -212,18 +223,18 @@
             font-weight: bold;
         }
 
-        /* Leaflet 팝업 스타일 커스텀 */
-        .leaflet-popup-content-value {
-            font-size: 0.9rem;
-            line-height: 1.4;
-        }
+        /* 지도 팝업 스타일 커스텀 */
         .leaflet-popup-content-title {
             font-weight: bold;
-            font-size: 1rem;
+            font-size: 1.05rem;
             color: var(--primary-color);
             border-bottom: 1px solid #eee;
             padding-bottom: 4px;
             margin-bottom: 6px;
+        }
+        .leaflet-popup-content-value {
+            font-size: 0.9rem;
+            line-height: 1.5;
         }
     </style>
 </head>
@@ -238,8 +249,8 @@
         <div id="error-message"></div>
 
         <div class="main-layout">
-            <div class="card" style="padding: 1rem;">
-                <h3 style="margin-top: 0; margin-bottom: 1rem; color: var(--primary-color);">연안 위치 지도 (마커 클릭 가능)</h3>
+            <div class="card" id="map-card">
+                <h3 style="margin-top: 0; margin-bottom: 1rem; color: var(--primary-color);">연안 위치 지도 (원형 마커 클릭)</h3>
                 <div id="map-container">
                     <div id="map"></div>
                 </div>
@@ -307,7 +318,7 @@
         let map = null;
         let markersGroup = null;
 
-        // 주요 해해안 지점의 경위도 데이터베이스 매핑 테이블 (실제 위치 기반 설정)
+        // 주요 해안 지점의 위경도 좌표 데이터베이스
         const coastCoordinates = {
             // 동해
             "거진연안": [38.267, 128.604],
@@ -376,29 +387,48 @@
 
         Chart.register(ChartDataLabels);
 
-        window.addEventListener('DOMContentLoaded', () => {
+        // 페이지 완전히 준비된 후 시작
+        window.addEventListener('load', () => {
             initMap();
             fetchCSVData();
         });
 
-        // 1. 지도 초기화
+        // 1. 지도 인스턴스 명확히 생성
         function initMap() {
-            // 대한민국 중심부 기준 위치 잡기
-            map = L.map('map').setView([36.0, 127.8], 7);
-            
-            // 오픈스트리트맵 타일 레이어 등록
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors'
-            }).addTo(map);
+            try {
+                // 대한민국 해안선 중심 좌표 설정 (한반도 전체가 잘 보이도록 확대레벨 6.5~7 지정)
+                map = L.map('map', {
+                    center: [35.8, 127.8],
+                    zoom: 6.8,
+                    zoomControl: true
+                });
+                
+                // 안정성이 검증된 글로벌 오픈스트리트맵 레이어 추가
+                const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 18,
+                    attribution: '© OpenStreetMap'
+                });
+                
+                osmLayer.addTo(map);
 
-            markersGroup = L.layerGroup().addTo(map);
+                markersGroup = L.layerGroup().addTo(map);
+
+                // 지도가 찌그러져 렌더링되는 오류 강제 방지
+                setTimeout(() => {
+                    map.invalidateSize();
+                }, 400);
+
+            } catch (e) {
+                console.error("지도를 초기화하지 못했습니다: ", e);
+                showError("지도 구성 요소를 불러오는 중 오류가 발생했습니다.");
+            }
         }
 
-        // 2. CSV 파일 로드 및 한글 인코딩 처리
+        // 2. CSV 파일 원시 바이너리 파싱 (EUC-KR 디코더 탑재)
         function fetchCSVData() {
             fetch(CSV_FILE_PATH)
                 .then(response => {
-                    if (!response.ok) throw new Error('네트워크 응답 에러');
+                    if (!response.ok) throw new Error('CSV 파일을 찾을 수 없습니다.');
                     return response.arrayBuffer();
                 })
                 .then(buffer => {
@@ -412,20 +442,20 @@
                             if (results.data && results.data.length > 2) {
                                 processData(results.data);
                             } else {
-                                showError("CSV 데이터 형식이 올바르지 않습니다.");
+                                showError("CSV 파일 형식이 올바르지 않습니다.");
                             }
                         },
                         error: function() {
-                            showError("데이터 파싱 중 오류가 발생했습니다.");
+                            showError("데이터 파싱에 실패했습니다.");
                         }
                     });
                 })
                 .catch(error => {
-                    showError(`CSV 파일을 불러오지 못했습니다. 파일명과 위치가 올바른지 확인해 주세요.`);
+                    showError(`CSV 데이터 로드 실패: '${CSV_FILE_PATH}' 파일이 같은 폴더에 있는지 확인해 주세요.`);
                 });
         }
 
-        // 3. 데이터 정제 및 동기화
+        // 3. 데이터 구조화 및 바인딩
         function processData(data) {
             parsedData = data.slice(2).map(row => {
                 const cleanRegion = row[0]?.trim() || "";
@@ -453,54 +483,51 @@
             errorMessage.style.display = 'block';
         }
 
-        // 4. 지도상에 연안 지점 마커 표시하기
+        // 4. 지도 마커 렌더링
         function renderMapMarkers() {
+            if (!markersGroup) return;
             markersGroup.clearLayers();
 
             parsedData.forEach(item => {
                 const coords = coastCoordinates[item.coast];
                 if (coords) {
                     const isAvailable = item.status.includes("가능") && !item.status.includes("불가");
-                    
-                    // 판정 결과에 따른 마커 색상 구분용 아이콘 정의
-                    // 불가: 빨간색 계열 아이콘, 가능: 푸른색/초록색 계열 아이콘
                     const colorClass = isAvailable ? '#2ec4b6' : '#e71d36';
                     
-                    const customMarkerIcon = L.divIcon({
-                        className: 'custom-div-icon',
-                        html: `<div style="background-color: ${colorClass}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.4);"></div>`,
-                        iconSize: [14, 14],
-                        iconAnchor: [7, 7]
-                    });
+                    // Leaflet 고유의 CircleMarker 사용 (로딩 지연 최소화 및 고품질 원형 보장)
+                    const marker = L.circleMarker(coords, {
+                        radius: 8,
+                        fillColor: colorClass,
+                        color: "#ffffff",
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.9
+                    }).addTo(markersGroup);
 
-                    const marker = L.marker(coords, { icon: customMarkerIcon }).addTo(markersGroup);
-
-                    // 지도 마커에 마우스 오버 시 미니 요약 팝업 표시
                     const popupContent = `
                         <div class="leaflet-popup-content-title">${item.coast}</div>
                         <div class="leaflet-popup-content-value">
+                            해역: <b>${item.region}</b><br>
                             수온: <b>${item.temp} ℃</b><br>
                             pH: <b>${item.ph}</b><br>
                             DO: <b>${item.do} ㎎/ℓ</b><br>
-                            <span style="color: ${colorClass}; font-weight: bold;">[${item.status}]</span>
+                            <span style="color: ${colorClass}; font-weight: bold;">${item.status}</span>
                         </div>
                     `;
                     marker.bindPopup(popupContent);
 
-                    // 마커 클릭 시 대시보드 및 차트와 연동
+                    // 마커 클릭 상호작용
                     marker.on('click', () => {
-                        // 드롭다운 메뉴도 자동으로 일치시킴
                         seaRegionSelect.value = item.region;
-                        
-                        // 연안 드롭다운을 활성화하고 옵션 리스트 생성 후 매칭
                         triggerCoastDropdown(item.region, item.coast);
                         updateDashboard(item);
+                        map.setView(coords, 9); // 클릭한 지점으로 부드럽게 집중
                     });
                 }
             });
         }
 
-        // 5. 드롭다운 제어
+        // 5. 드롭다운 선택 컨트롤러 구성
         function initSelectOptions() {
             const regions = [...new Set(parsedData.map(item => item.region))];
             
@@ -531,10 +558,15 @@
                 if (targetData) {
                     updateDashboard(targetData);
                     
-                    // 지도를 해당 마커 위치로 부드럽게 이동시킴
                     const coords = coastCoordinates[selectedCoast];
                     if (coords) {
                         map.setView(coords, 10);
+                        // 지도의 해당 마커 팝업 열기
+                        markersGroup.eachLayer(layer => {
+                            if (layer.getLatLng().lat === coords[0] && layer.getLatLng().lng === coords[1]) {
+                                layer.openPopup();
+                            }
+                        });
                     }
                 }
             });
@@ -564,7 +596,7 @@
             coastSelect.disabled = false;
         }
 
-        // 6. 상태 및 대시보드 초기화/업데이트
+        // 6. 상태 및 그래프 업데이트
         function resetDashboard() {
             selectedTitle.textContent = '해양 데이터 정보';
             valTemp.textContent = '-';
@@ -580,7 +612,7 @@
         }
 
         function updateDashboard(data) {
-            selectedTitle.textContent = `[${data.region}] ${data.coast} 해양 환경 데이터`;
+            selectedTitle.textContent = `[${data.region}] ${data.coast} 해양 데이터`;
             valTemp.textContent = data.temp + ' ℃';
             valPh.textContent = data.ph;
             valDo.textContent = data.do + ' ㎎/ℓ';
@@ -595,12 +627,12 @@
 
             if (marineChart) {
                 marineChart.data.datasets[0].data = [data.temp, data.ph, data.do];
-                marineChart.data.datasets[0].label = `${data.coast} 실측 데이터`;
+                marineChart.data.datasets[0].label = `${data.coast} 수치`;
                 marineChart.update();
             }
         }
 
-        // 7. Chart.js 막대그래프 셋업
+        // 7. 차트 초기화
         function initChart() {
             const ctx = document.getElementById('marineChart').getContext('2d');
             Chart.defaults.font.family = "'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif";
@@ -631,7 +663,7 @@
                     scales: {
                         y: {
                             beginAtZero: true,
-                            suggestedMax: 20
+                            suggestedMax: 22
                         }
                     },
                     plugins: {
