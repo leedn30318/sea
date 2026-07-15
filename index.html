@@ -20,7 +20,7 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
             margin: 0;
             padding: 0;
             background-color: var(--bg-color);
@@ -85,6 +85,7 @@
             background-color: white;
             font-size: 1rem;
             outline: none;
+            font-family: inherit;
         }
 
         .dashboard-grid {
@@ -246,44 +247,67 @@
         const statusContainer = document.getElementById('status-container');
         const errorMessage = document.getElementById('error-message');
 
-        // Chart.js에 플러그인 등록 (숫자 상단 표시용)
+        // Chart.js에 데이터 라벨 플러그인 등록
         Chart.register(ChartDataLabels);
 
         window.addEventListener('DOMContentLoaded', () => {
             fetchCSVData();
         });
 
+        // 깨진 한글 문자를 방지하기 위한 안전 장치 포함 파싱 함수
         function fetchCSVData() {
-            // 한글 깨짐 방지를 위해 encoding을 'EUC-KR'로 명시적 지정
-            Papa.parse(CSV_FILE_PATH, {
-                download: true,
-                header: false,
-                skipEmptyLines: true,
-                encoding: "EUC-KR", 
-                complete: function(results) {
-                    if (results.data && results.data.length > 2) {
-                        processData(results.data);
-                    } else {
-                        showError("CSV 데이터 형식 구조를 읽을 수 없습니다.");
+            // 파일을 바이너리로 가져와 한글 인코딩(EUC-KR)으로 직접 변환 시도
+            fetch(CSV_FILE_PATH)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('네트워크 응답 에러');
                     }
-                },
-                error: function(err) {
-                    showError(`CSV 파일을 불러오지 못했습니다. 파일명을 확인해 주세요.`);
-                }
-            });
+                    return response.arrayBuffer();
+                })
+                .then(buffer => {
+                    // 한글 인코딩 디코더 적용 (EUC-KR)
+                    const decoder = new TextDecoder('euc-kr');
+                    const csvText = decoder.decode(buffer);
+                    
+                    // 디코딩 완료된 텍스트를 PapaParse로 처리
+                    Papa.parse(csvText, {
+                        header: false,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            if (results.data && results.data.length > 2) {
+                                processData(results.data);
+                            } else {
+                                showError("CSV 데이터 형식이 올바르지 않습니다.");
+                            }
+                        },
+                        error: function(err) {
+                            showError("데이터 파싱 중 오류가 발생했습니다.");
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error(error);
+                    showError(`CSV 파일을 불러오지 못했습니다. 파일명과 위치가 올바른지 확인해 주세요.`);
+                });
         }
 
+        // 데이터를 변수에 담고 정제하는 함수
         function processData(data) {
-            // 두 번째 행 헤더 건너뛰고 인덱스 2부터 실데이터 파싱
+            // 인덱스 0, 1은 헤더 정보이므로 데이터는 인덱스 2부터 파싱 시작
             parsedData = data.slice(2).map(row => {
+                // 특수 줄바꿈 문자(\r, \n)나 공백 제거
+                const cleanRegion = row[0]?.trim() || "";
+                const cleanCoast = row[1]?.trim() || "";
+                const cleanStatus = row[6]?.trim() || "";
+                
                 return {
-                    region: row[0]?.trim(),
-                    coast: row[1]?.trim(),
-                    layer: row[2]?.trim(),
+                    region: cleanRegion,
+                    coast: cleanCoast,
+                    layer: row[2]?.trim() || "",
                     temp: parseFloat(row[3]) || 0,
                     ph: parseFloat(row[4]) || 0,
                     do: parseFloat(row[5]) || 0,
-                    status: row[6]?.trim() || "정보 없음"
+                    status: cleanStatus
                 };
             }).filter(item => item.region && item.coast);
 
@@ -296,9 +320,13 @@
             errorMessage.style.display = 'block';
         }
 
+        // 셀렉트 박스 동적 바인딩 및 초기화
         function initSelectOptions() {
+            // 중복 없는 해역 정보 추출
             const regions = [...new Set(parsedData.map(item => item.region))];
             
+            // 기존 옵션 리셋 및 추가
+            seaRegionSelect.innerHTML = '<option value="">-- 해역을 선택하세요 --</option>';
             regions.forEach(region => {
                 const option = document.createElement('option');
                 option.value = region;
@@ -316,6 +344,7 @@
                     return;
                 }
 
+                // 선택한 해역에 맞는 중복 없는 연안 추출
                 const filteredCoasts = [...new Set(
                     parsedData.filter(item => item.region === selectedRegion).map(item => item.coast)
                 )];
@@ -361,21 +390,21 @@
         }
 
         function updateDashboard(data) {
-            // 상단 카드에 숫자 및 단위 정상 매칭
+            // 한글 및 숫자 수치 표기
             valTemp.textContent = data.temp + ' ℃';
             valPh.textContent = data.ph;
             valDo.textContent = data.do + ' ㎎/ℓ';
 
-            // 판정 결과 (한글 문자열 그대로 바인딩)
             statusContainer.innerHTML = '';
             const badge = document.createElement('div');
             
+            // CSV 내부 한글 텍스트에서 '가능' 여부 확인
             const isAvailable = data.status.includes("가능") && !data.status.includes("불가");
             badge.className = `status-badge ${isAvailable ? 'status-available' : 'status-unavailable'}`;
             badge.textContent = data.status; // 예: "해양알칼리도 기술 사용 불가"
             statusContainer.appendChild(badge);
 
-            // 차트 갱신
+            // 차트 레이블과 막대 데이터 동시 업데이트
             if (marineChart) {
                 marineChart.data.datasets[0].data = [data.temp, data.ph, data.do];
                 marineChart.data.datasets[0].label = `${data.coast} 환경 수치`;
@@ -385,6 +414,10 @@
 
         function initChart() {
             const ctx = document.getElementById('marineChart').getContext('2d');
+            
+            // 차트 기본 폰트를 한글을 완벽하게 지원하는 기본 시스템 폰트로 고정
+            Chart.defaults.font.family = "'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif";
+
             marineChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
@@ -411,11 +444,31 @@
                     scales: {
                         y: {
                             beginAtZero: true,
-                            suggestedMax: 20
+                            suggestedMax: 20,
+                            ticks: {
+                                font: {
+                                    size: 11
+                                }
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                font: {
+                                    size: 12,
+                                    weight: 'bold'
+                                }
+                            }
                         }
                     },
                     plugins: {
-                        // 막대 그래프 바로 위에 숫자 띄우는 옵션 설정
+                        legend: {
+                            labels: {
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        // 막대 위에 실제 정밀 수치 한글/숫자 포맷팅 출력
                         datalabels: {
                             anchor: 'end',
                             align: 'top',
