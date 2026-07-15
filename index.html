@@ -6,6 +6,7 @@
     <title>해양 데이터 및 해양알칼리도 기술 판정 대시보드</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
     <style>
         :root {
             --primary-color: #0b3c5d;
@@ -51,7 +52,6 @@
             padding: 0 1rem;
         }
 
-        /* 컨트롤러 영역 */
         .controls-card {
             background-color: var(--card-bg);
             border-radius: 8px;
@@ -85,14 +85,8 @@
             background-color: white;
             font-size: 1rem;
             outline: none;
-            transition: border-color 0.2s;
         }
 
-        .control-group select:focus {
-            border-color: var(--secondary-color);
-        }
-
-        /* 요약 및 판정 결과 영역 */
         .dashboard-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -123,7 +117,7 @@
         }
 
         .status-badge {
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             font-weight: bold;
             padding: 0.8rem 1.5rem;
             border-radius: 50px;
@@ -132,13 +126,8 @@
             display: inline-block;
         }
 
-        .status-available {
-            background-color: var(--success-color);
-        }
-
-        .status-unavailable {
-            background-color: var(--danger-color);
-        }
+        .status-available { background-color: var(--success-color); }
+        .status-unavailable { background-color: var(--danger-color); }
 
         .data-grid {
             display: grid;
@@ -166,17 +155,15 @@
             color: var(--primary-color);
         }
 
-        /* 차트 영역 */
         .chart-card {
             background-color: var(--card-bg);
             border-radius: 8px;
             padding: 1.5rem;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             margin-bottom: 2rem;
-            height: 400px;
+            height: 450px;
         }
 
-        /* 에러 메시지 */
         #error-message {
             background-color: #ffe3e3;
             color: var(--danger-color);
@@ -184,8 +171,8 @@
             border-radius: 6px;
             margin-bottom: 1rem;
             display: none;
-            font-weight: bold;
             text-align: center;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -233,7 +220,7 @@
                 </div>
             </div>
 
-            <div class="card status-card" id="result-card">
+            <div class="card status-card">
                 <h3>해양알칼리도 기술 적용 여부 판정</h3>
                 <div id="status-container">
                     <span style="color: #999;">연안을 선택하면 판정 결과가 표시됩니다.</span>
@@ -247,15 +234,10 @@
     </div>
 
     <script>
-        // 상수 정의 (실제 CSV 파일명)
         const CSV_FILE_PATH = '2002-2025 해양데이터_해양알칼리도판정.csv';
-        
-        // 애플리케이션 상태 데이터
-        let rawData = [];
         let parsedData = [];
         let marineChart = null;
 
-        // DOM 요소 
         const seaRegionSelect = document.getElementById('sea-region-select');
         const coastSelect = document.getElementById('coast-select');
         const valTemp = document.getElementById('val-temp');
@@ -264,61 +246,57 @@
         const statusContainer = document.getElementById('status-container');
         const errorMessage = document.getElementById('error-message');
 
-        // 페이지 로드 시 CSV 데이터 읽기 시작
+        // Chart.js에 플러그인 등록 (숫자 상단 표시용)
+        Chart.register(ChartDataLabels);
+
         window.addEventListener('DOMContentLoaded', () => {
             fetchCSVData();
         });
 
-        // CSV 파일 로드 및 파싱 함수
         function fetchCSVData() {
+            // 한글 깨짐 방지를 위해 encoding을 'EUC-KR'로 명시적 지정
             Papa.parse(CSV_FILE_PATH, {
                 download: true,
-                header: false, // 2줄짜리 특수 헤더 구조이므로 false로 받아 직접 정제합니다.
+                header: false,
                 skipEmptyLines: true,
+                encoding: "EUC-KR", 
                 complete: function(results) {
-                    rawData = results.data;
-                    if (rawData.length > 2) {
-                        processData(rawData);
+                    if (results.data && results.data.length > 2) {
+                        processData(results.data);
                     } else {
-                        showError("CSV 파일에 데이터가 부족하거나 올바르지 않은 형식입니다.");
+                        showError("CSV 데이터 형식 구조를 읽을 수 없습니다.");
                     }
                 },
                 error: function(err) {
-                    console.error("CSV 파일 로드 실패:", err);
-                    showError(`CSV 파일을 불러오지 못했습니다. 파일명이 정확한지 확인해 주세요. (파일명: ${CSV_FILE_PATH})`);
+                    showError(`CSV 파일을 불러오지 못했습니다. 파일명을 확인해 주세요.`);
                 }
             });
         }
 
-        // 데이터 정제 및 객체 배열 변환
         function processData(data) {
-            // 인덱스 0, 1은 헤더 정보이므로 데이터는 인덱스 2부터 시작
-            // 구조: 0:해역, 1:연안, 2:층별, 3:수온, 4:pH, 5:DO, 6:알칼리도여부
+            // 두 번째 행 헤더 건너뛰고 인덱스 2부터 실데이터 파싱
             parsedData = data.slice(2).map(row => {
                 return {
                     region: row[0]?.trim(),
                     coast: row[1]?.trim(),
                     layer: row[2]?.trim(),
-                    temp: parseFloat(row[3]),
-                    ph: parseFloat(row[4]),
-                    do: parseFloat(row[5]),
-                    status: row[6]?.trim()
+                    temp: parseFloat(row[3]) || 0,
+                    ph: parseFloat(row[4]) || 0,
+                    do: parseFloat(row[5]) || 0,
+                    status: row[6]?.trim() || "정보 없음"
                 };
-            }).filter(item => item.region && item.coast); // 비어있는 유효하지 않은 데이터 제거
+            }).filter(item => item.region && item.coast);
 
             initSelectOptions();
             initChart();
         }
 
-        // 에러 메시지 표시
         function showError(msg) {
             errorMessage.textContent = msg;
             errorMessage.style.display = 'block';
         }
 
-        // 셀렉트 박스 옵션 초기화
         function initSelectOptions() {
-            // 고유한 해역 추출
             const regions = [...new Set(parsedData.map(item => item.region))];
             
             regions.forEach(region => {
@@ -328,7 +306,6 @@
                 seaRegionSelect.appendChild(option);
             });
 
-            // 해역 선택 이벤트
             seaRegionSelect.addEventListener('change', (e) => {
                 const selectedRegion = e.target.value;
                 coastSelect.innerHTML = '<option value="">-- 연안을 선택하세요 --</option>';
@@ -339,7 +316,6 @@
                     return;
                 }
 
-                // 선택된 해역에 속한 고유 연안 추출
                 const filteredCoasts = [...new Set(
                     parsedData.filter(item => item.region === selectedRegion).map(item => item.coast)
                 )];
@@ -355,7 +331,6 @@
                 resetDashboard();
             });
 
-            // 연안 선택 이벤트
             coastSelect.addEventListener('change', (e) => {
                 const selectedRegion = seaRegionSelect.value;
                 const selectedCoast = e.target.value;
@@ -365,7 +340,6 @@
                     return;
                 }
 
-                // 해당 연안 데이터 매칭
                 const targetData = parsedData.find(item => item.region === selectedRegion && item.coast === selectedCoast);
                 if (targetData) {
                     updateDashboard(targetData);
@@ -373,37 +347,35 @@
             });
         }
 
-        // 대시보드 리셋
         function resetDashboard() {
             valTemp.textContent = '-';
             valPh.textContent = '-';
             valDo.textContent = '-';
             statusContainer.innerHTML = '<span style="color: #999;">연안을 선택하면 판정 결과가 표시됩니다.</span>';
             
-            // 차트 리셋 (기본 데이터 전체 평균 시각화 혹은 빈 상태 유지 가능, 여기선 리셋)
             if (marineChart) {
                 marineChart.data.datasets[0].data = [0, 0, 0];
+                marineChart.data.datasets[0].label = '연안을 선택해주세요';
                 marineChart.update();
             }
         }
 
-        // 대시보드 수치, 판정 결과, 차트 업데이트
         function updateDashboard(data) {
-            // 수치 입력
-            valTemp.textContent = data.temp.toFixed(2);
-            valPh.textContent = data.ph.toFixed(2);
-            valDo.textContent = data.do.toFixed(2);
+            // 상단 카드에 숫자 및 단위 정상 매칭
+            valTemp.textContent = data.temp + ' ℃';
+            valPh.textContent = data.ph;
+            valDo.textContent = data.do + ' ㎎/ℓ';
 
-            // 판정 결과 Badge 생성
-            const isAvailable = data.status.includes("가능") && !data.status.includes("불가");
+            // 판정 결과 (한글 문자열 그대로 바인딩)
             statusContainer.innerHTML = '';
-            
             const badge = document.createElement('div');
+            
+            const isAvailable = data.status.includes("가능") && !data.status.includes("불가");
             badge.className = `status-badge ${isAvailable ? 'status-available' : 'status-unavailable'}`;
-            badge.textContent = data.status;
+            badge.textContent = data.status; // 예: "해양알칼리도 기술 사용 불가"
             statusContainer.appendChild(badge);
 
-            // 차트 데이터 업데이트
+            // 차트 갱신
             if (marineChart) {
                 marineChart.data.datasets[0].data = [data.temp, data.ph, data.do];
                 marineChart.data.datasets[0].label = `${data.coast} 환경 수치`;
@@ -411,7 +383,6 @@
             }
         }
 
-        // Chart.js 초기화
         function initChart() {
             const ctx = document.getElementById('marineChart').getContext('2d');
             marineChart = new Chart(ctx, {
@@ -422,9 +393,9 @@
                         label: '연안을 선택해주세요',
                         data: [0, 0, 0],
                         backgroundColor: [
-                            'rgba(231, 29, 54, 0.7)',  /* 수온 - 적색 계열 */
-                            'rgba(50, 140, 193, 0.7)', /* pH - 청색 계열 */
-                            'rgba(46, 196, 182, 0.7)'  /* DO - 민트 계열 */
+                            'rgba(231, 29, 54, 0.7)',
+                            'rgba(50, 140, 193, 0.7)',
+                            'rgba(46, 196, 182, 0.7)'
                         ],
                         borderColor: [
                             'rgba(231, 29, 54, 1)',
@@ -444,8 +415,17 @@
                         }
                     },
                     plugins: {
-                        legend: {
-                            position: 'top',
+                        // 막대 그래프 바로 위에 숫자 띄우는 옵션 설정
+                        datalabels: {
+                            anchor: 'end',
+                            align: 'top',
+                            font: {
+                                weight: 'bold',
+                                size: 13
+                            },
+                            formatter: function(value) {
+                                return value > 0 ? value.toFixed(2) : '';
+                            }
                         }
                     }
                 }
